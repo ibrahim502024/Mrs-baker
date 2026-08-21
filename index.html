@@ -161,6 +161,10 @@
     font-family:'Fredoka',sans-serif; font-size:14px; background:var(--cream); color:var(--cocoa); outline:none;
   }
   .item-row .gram-wrap span{ font-size:12px; color:var(--cocoa-soft); font-weight:700;}
+  .item-row .gram-wrap select.unit-select{
+    font-size:12px; color:var(--cocoa-soft); font-weight:700; border:1.5px solid var(--line);
+    border-radius:8px; background:var(--cream); padding:5px 4px; font-family:'Nunito',sans-serif; outline:none;
+  }
   .item-cost{
     font-family:'Fredoka',sans-serif; font-size:13.5px; font-weight:600; color:var(--rose-deep); min-width:56px;
     text-align:right;
@@ -242,6 +246,28 @@ const UNIT_PRESETS = [
   { qty: 1,   unit: 'pcs', label: '1 pc' },
 ];
 
+// Groups of units that can be freely converted between each other.
+// "base" is the smallest unit in the group; factors say how many base units make up 1 of that unit.
+const UNIT_GROUPS = {
+  weight: { base: 'g',   factors: { g: 1, kg: 1000 } },
+  volume: { base: 'ml',  factors: { ml: 1, l: 1000 } },
+  count:  { base: 'pcs', factors: { pcs: 1, dozen: 12 } },
+};
+function findUnitGroup(unit){
+  const u = (unit || '').trim().toLowerCase();
+  for (const key in UNIT_GROUPS){
+    if (Object.prototype.hasOwnProperty.call(UNIT_GROUPS[key].factors, u)) return UNIT_GROUPS[key];
+  }
+  return null;
+}
+// Converts a quantity in the given unit to the group's base unit. Unknown/custom units pass through unchanged.
+function toBaseQty(qty, unit){
+  const n = parseFloat(qty) || 0;
+  const grp = findUnitGroup(unit);
+  if (!grp) return n;
+  return n * grp.factors[(unit || '').trim().toLowerCase()];
+}
+
 // Upgrades ingredients saved under the old fixed "price per 100g" shape.
 function migrateIngredient(ing){
   if (ing && ing.price !== undefined && ing.qty !== undefined && ing.unit !== undefined) return ing;
@@ -250,13 +276,20 @@ function migrateIngredient(ing){
     price: ing.pricePer100g || 0, qty: 100, unit: 'g'
   };
 }
-// Upgrades recipes whose items were saved under the old "grams" field.
-function migrateRecipe(r){
+// Upgrades recipes whose items were saved under the old "grams" field, or lack a per-item unit.
+function migrateRecipe(r, ingredients){
   return {
     ...r,
-    items: (r.items || []).map(it => it.amount !== undefined
-      ? it
-      : { ingredientId: it.ingredientId, amount: it.grams })
+    items: (r.items || []).map(it => {
+      if (it.amount !== undefined && it.unit !== undefined) return it;
+      const amount = it.amount !== undefined ? it.amount : it.grams;
+      let unit = it.unit;
+      if (!unit) {
+        const ing = (ingredients || []).find(i => i.id === it.ingredientId);
+        unit = ing ? ing.unit : 'g';
+      }
+      return { ingredientId: it.ingredientId, amount, unit };
+    })
   };
 }
 
@@ -281,16 +314,19 @@ function fmtRs(n){
   return n.toLocaleString('en-IN', { maximumFractionDigits: 2, minimumFractionDigits: 0 });
 }
 
-function costOf(ingredientId, amount){
+function costOf(ingredientId, amount, unit){
   const ing = state.ingredients.find(i => i.id === ingredientId);
   if (!ing) return 0;
-  const a = parseFloat(amount) || 0;
-  const qty = ing.qty || 1;
-  return (ing.price / qty) * a;
+  const baseQtyIng = toBaseQty(ing.qty, ing.unit);
+  if (baseQtyIng <= 0) return 0;
+  const unitCostBase = ing.price / baseQtyIng;
+  const useUnit = unit || ing.unit;
+  const baseAmount = toBaseQty(amount, useUnit);
+  return unitCostBase * baseAmount;
 }
 
 function recipeTotal(recipe){
-  return recipe.items.reduce((sum, it) => sum + costOf(it.ingredientId, it.amount), 0);
+  return recipe.items.reduce((sum, it) => sum + costOf(it.ingredientId, it.amount, it.unit), 0);
 }
 
 function uid(prefix){
@@ -340,7 +376,7 @@ async function loadData(){
     state.ingredients = ing.map(migrateIngredient);
 
     let rec = lsGet(STORAGE_KEY_RECIPES);
-    state.recipes = Array.isArray(rec) ? rec.map(migrateRecipe) : [];
+    state.recipes = Array.isArray(rec) ? rec.map(r => migrateRecipe(r, state.ingredients)) : [];
   } catch (err){
     console.error('Storage load error', err);
     state.storageError = true;
@@ -449,7 +485,8 @@ function addItemToDraft(ingredientId){
     showToast('Already added');
     return;
   }
-  state.draftRecipe.items.push({ ingredientId, amount: '' });
+  const ing = state.ingredients.find(i => i.id === ingredientId);
+  state.draftRecipe.items.push({ ingredientId, amount: '', unit: ing ? ing.unit : 'g' });
   render();
 }
 function removeItemFromDraft(ingredientId){
@@ -461,9 +498,14 @@ function updateDraftAmount(ingredientId, amount){
   if (it) it.amount = amount;
   // live-update DOM without full re-render to keep focus
   const costEl = document.querySelector(`.item-cost[data-for="${ingredientId}"]`);
-  if (costEl) costEl.textContent = 'Rs. ' + fmtRs(costOf(ingredientId, amount));
+  if (costEl) costEl.textContent = 'Rs. ' + fmtRs(costOf(ingredientId, amount, it ? it.unit : undefined));
   const totalEl = document.querySelector('.total-ticket .amount');
   if (totalEl) totalEl.textContent = 'Rs. ' + fmtRs(recipeTotal(state.draftRecipe));
+}
+function updateDraftUnit(ingredientId, unit){
+  const it = state.draftRecipe.items.find(x => x.ingredientId === ingredientId);
+  if (it) it.unit = unit;
+  render();
 }
 function updateDraftName(val){
   state.draftRecipe.name = val;
@@ -668,7 +710,13 @@ function renderIngredients(){
         <span class="ing-emoji">${ing.emoji}</span>
         <div class="ing-info">
           <div class="ing-name">${escapeHtml(ing.name)}</div>
-          <div class="ing-sub">Rs. ${fmtRs(ing.price)} per ${fmtRs(ing.qty)} ${escapeHtml(ing.unit)}</div>
+          <div class="ing-sub">Rs. ${fmtRs(ing.price)} per ${fmtRs(ing.qty)} ${escapeHtml(ing.unit)}${(() => {
+            const grp = findUnitGroup(ing.unit);
+            if (!grp) return '';
+            const baseQty = toBaseQty(ing.qty, ing.unit);
+            if (baseQty <= 0) return '';
+            return ` (Rs. ${fmtRs(ing.price / baseQty)} / ${grp.base})`;
+          })()}</div>
         </div>
         <button class="icon-btn edit-ing-btn" data-id="${ing.id}">✏️</button>
         <button class="icon-btn delete-ing-btn" data-id="${ing.id}">✕</button>
@@ -744,15 +792,21 @@ function renderRecipeForm(){
       ${draft.items.map(it => {
         const ing = state.ingredients.find(i => i.id === it.ingredientId);
         if (!ing) return '';
+        const grp = findUnitGroup(ing.unit);
+        const unitControl = grp
+          ? `<select class="unit-select" data-id="${it.ingredientId}">
+               ${Object.keys(grp.factors).map(u => `<option value="${u}" ${(it.unit || ing.unit).toLowerCase() === u ? 'selected' : ''}>${u}</option>`).join('')}
+             </select>`
+          : `<span>${escapeHtml(ing.unit)}</span>`;
         return `
           <div class="item-row">
             <span class="ing-emoji">${ing.emoji}</span>
             <span class="item-name">${escapeHtml(ing.name)}</span>
             <div class="gram-wrap">
               <input type="number" inputmode="decimal" min="0" placeholder="0" value="${it.amount}" data-id="${it.ingredientId}" class="grams-input" />
-              <span>${escapeHtml(ing.unit)}</span>
+              ${unitControl}
             </div>
-            <span class="item-cost" data-for="${it.ingredientId}">Rs. ${fmtRs(costOf(it.ingredientId, it.amount))}</span>
+            <span class="item-cost" data-for="${it.ingredientId}">Rs. ${fmtRs(costOf(it.ingredientId, it.amount, it.unit))}</span>
             <button class="icon-btn remove-item-btn" data-id="${it.ingredientId}">✕</button>
           </div>`;
       }).join('')}
@@ -780,6 +834,9 @@ function renderRecipeForm(){
 
   document.querySelectorAll('.grams-input').forEach(inp => {
     inp.addEventListener('input', (e) => updateDraftAmount(e.target.dataset.id, e.target.value));
+  });
+  document.querySelectorAll('.unit-select').forEach(sel => {
+    sel.addEventListener('change', (e) => updateDraftUnit(e.target.dataset.id, e.target.value));
   });
   document.querySelectorAll('.remove-item-btn').forEach(btn => {
     btn.onclick = () => removeItemFromDraft(btn.dataset.id);
