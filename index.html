@@ -4,6 +4,13 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Mrs. Baker needs help</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#D9767E">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Mrs. Baker">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
@@ -199,7 +206,49 @@
   .total-ticket .label{ font-family:'Fredoka',sans-serif; font-size:14px; font-weight:500; opacity:.9;}
   .total-ticket .amount{ font-family:'Fredoka',sans-serif; font-size:26px; font-weight:600; }
 
-  /* ---------- modal ---------- */
+  .profit-block{ margin-top:8px; }
+  .profit-row{
+    display:flex; justify-content:space-between; align-items:baseline; font-size:13.5px; font-weight:700;
+    color:var(--cocoa-soft); padding:4px 2px;
+  }
+  .profit-pos{ color:var(--sage); }
+  .profit-neg{ color:#C0504D; }
+
+  .backup-row{ display:flex; gap:8px; margin-bottom:14px; }
+  .backup-row .btn{ flex:1; font-size:12.5px; padding:9px 8px; }
+
+  .search-wrap{ margin-bottom:14px; }
+  .search-wrap input{
+    width:100%; padding:11px 14px; border-radius:14px; border:1.5px solid var(--line); background:var(--card);
+    font-family:'Nunito',sans-serif; font-size:14.5px; color:var(--cocoa); outline:none;
+  }
+  .search-wrap input:focus{ border-color:var(--rose); }
+
+  .ing-history{
+    margin-top:8px; padding-top:8px; border-top:1px dashed var(--line); font-size:11.5px; color:var(--cocoa-soft);
+  }
+  .ing-history .hist-row{ display:flex; justify-content:space-between; padding:2px 0; }
+
+  .profit-chip{
+    display:inline-flex; align-items:center; gap:3px; background:#EAF1E3; color:#5C7548; font-family:'Fredoka',sans-serif;
+    font-weight:600; font-size:11.5px; padding:3px 8px; border-radius:999px; margin-left:6px;
+  }
+
+  .text-toggle-btn{
+    margin-left:auto; border:1.5px solid var(--line); background:var(--card); color:var(--cocoa); font-family:'Fredoka',sans-serif;
+    font-weight:600; font-size:13px; padding:7px 11px; border-radius:999px; cursor:pointer;
+  }
+  .text-toggle-btn:active{ background:var(--cream-deep); }
+
+  body.large-text .ing-name, body.large-text .item-name{ font-size:16.5px; }
+  body.large-text .ing-sub{ font-size:13px; }
+  body.large-text .section-sub, body.large-text p{ font-size:15px; }
+  body.large-text .btn{ font-size:16.5px; }
+  body.large-text .recipe-card h3{ font-size:16.5px; }
+  body.large-text .field label{ font-size:13.5px; }
+  body.large-text .field input, body.large-text .field select{ font-size:16.5px; }
+  body.large-text .brand p{ font-size:14px; }
+
   .modal-backdrop{
     position:fixed; inset:0; background:rgba(74,47,34,0.45); display:flex; align-items:center; justify-content:center;
     padding:24px; z-index:50;
@@ -214,9 +263,15 @@
 
   .toast{
     position:fixed; bottom:24px; left:50%; transform:translateX(-50%); background:var(--cocoa); color:#fff;
-    padding:10px 18px; border-radius:999px; font-size:13.5px; font-weight:600; font-family:'Nunito',sans-serif;
+    padding:10px 10px 10px 18px; border-radius:999px; font-size:13.5px; font-weight:600; font-family:'Nunito',sans-serif;
     box-shadow:0 4px 12px rgba(0,0,0,0.2); z-index:60; opacity:0; transition:opacity .25s ease;
+    display:flex; align-items:center; gap:10px; max-width:90vw;
   }
+  .toast-action{
+    background:rgba(255,255,255,0.18); border:none; color:#fff; font-family:'Fredoka',sans-serif; font-weight:600;
+    font-size:13px; padding:6px 12px; border-radius:999px; cursor:pointer; flex-shrink:0;
+  }
+  .toast-action:active{ background:rgba(255,255,255,0.3); }
   .toast.show{ opacity:1; }
 
   .loading-wrap{ text-align:center; padding:80px 20px; color:var(--cocoa-soft); }
@@ -230,6 +285,8 @@
 <script>
 const STORAGE_KEY_INGREDIENTS = 'mrsBaker_ingredients_v2';
 const STORAGE_KEY_RECIPES = 'mrsBaker_recipes_v2';
+const STORAGE_KEY_RECENTS = 'mrsBaker_recents_v1';
+const STORAGE_KEY_TEXT_LARGE = 'mrsBaker_textLarge_v1';
 
 const DEFAULT_INGREDIENTS = [
   { id: 'butter', emoji: '🧈', name: 'Butter', price: 0, qty: 100, unit: 'g' },
@@ -268,18 +325,21 @@ function toBaseQty(qty, unit){
   return n * grp.factors[(unit || '').trim().toLowerCase()];
 }
 
-// Upgrades ingredients saved under the old fixed "price per 100g" shape.
+// Upgrades ingredients saved under the old fixed "price per 100g" shape, and ensures priceHistory exists.
 function migrateIngredient(ing){
-  if (ing && ing.price !== undefined && ing.qty !== undefined && ing.unit !== undefined) return ing;
-  return {
-    id: ing.id, emoji: ing.emoji, name: ing.name,
-    price: ing.pricePer100g || 0, qty: 100, unit: 'g'
-  };
+  let out = ing;
+  if (!(ing && ing.price !== undefined && ing.qty !== undefined && ing.unit !== undefined)) {
+    out = { id: ing.id, emoji: ing.emoji, name: ing.name, price: ing.pricePer100g || 0, qty: 100, unit: 'g' };
+  }
+  if (!Array.isArray(out.priceHistory)) out.priceHistory = [];
+  return out;
 }
-// Upgrades recipes whose items were saved under the old "grams" field, or lack a per-item unit.
+// Upgrades recipes whose items were saved under the old "grams" field, or lack a per-item unit / yield / sell price.
 function migrateRecipe(r, ingredients){
   return {
     ...r,
+    sellPrice: r.sellPrice !== undefined ? r.sellPrice : '',
+    yieldCount: r.yieldCount !== undefined ? r.yieldCount : '',
     items: (r.items || []).map(it => {
       if (it.amount !== undefined && it.unit !== undefined) return it;
       const amount = it.amount !== undefined ? it.amount : it.grams;
@@ -300,12 +360,19 @@ let state = {
   recipes: [],
   editingRecipeId: null,   // recipe currently being created/edited (null id until saved)
   editingIngredientId: null,
-  draftRecipe: null,       // { id, name, photo, items: [{ingredientId, amount}] }
+  historyOpenId: null,     // ingredient id whose price history is expanded
+  draftRecipe: null,       // { id, name, photo, sellPrice, yieldCount, items: [{ingredientId, amount, unit}] }
   newIngredientEmoji: '🧈',
   newIngredientQty: 100,
   newIngredientUnit: 'g',
+  searchQuery: '',
+  recentIngredientIds: [],
+  textLarge: false,
   storageError: false,
 };
+
+// Holds the most recently deleted item so a toast's "Undo" button can restore it.
+let undoStash = null;
 
 const app = document.getElementById('app');
 
@@ -333,15 +400,24 @@ function uid(prefix){
   return prefix + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2,7);
 }
 
-function showToast(msg){
+function showToast(msg, opts){
   const existing = document.querySelector('.toast');
   if (existing) existing.remove();
   const t = document.createElement('div');
   t.className = 'toast';
-  t.textContent = msg;
+  const msgSpan = document.createElement('span');
+  msgSpan.textContent = msg;
+  t.appendChild(msgSpan);
+  if (opts && opts.actionLabel && opts.onAction){
+    const btn = document.createElement('button');
+    btn.className = 'toast-action';
+    btn.textContent = opts.actionLabel;
+    btn.onclick = () => { opts.onAction(); t.remove(); };
+    t.appendChild(btn);
+  }
   document.body.appendChild(t);
   requestAnimationFrame(()=> t.classList.add('show'));
-  setTimeout(()=>{ t.classList.remove('show'); setTimeout(()=>t.remove(), 300); }, 1800);
+  setTimeout(()=>{ t.classList.remove('show'); setTimeout(()=>t.remove(), 300); }, (opts && opts.actionLabel) ? 4500 : 1800);
 }
 
 // ---------------- storage ----------------
@@ -377,6 +453,12 @@ async function loadData(){
 
     let rec = lsGet(STORAGE_KEY_RECIPES);
     state.recipes = Array.isArray(rec) ? rec.map(r => migrateRecipe(r, state.ingredients)) : [];
+
+    const recents = lsGet(STORAGE_KEY_RECENTS);
+    state.recentIngredientIds = Array.isArray(recents) ? recents : [];
+
+    state.textLarge = !!lsGet(STORAGE_KEY_TEXT_LARGE);
+    document.body.classList.toggle('large-text', state.textLarge);
   } catch (err){
     console.error('Storage load error', err);
     state.storageError = true;
@@ -397,6 +479,67 @@ async function saveRecipes(){
   if (!ok) showToast("Couldn't save — try again");
 }
 
+function saveRecents(){
+  lsSet(STORAGE_KEY_RECENTS, state.recentIngredientIds);
+}
+
+function toggleTextSize(){
+  state.textLarge = !state.textLarge;
+  document.body.classList.toggle('large-text', state.textLarge);
+  lsSet(STORAGE_KEY_TEXT_LARGE, state.textLarge);
+}
+
+// ---------------- backup / restore ----------------
+function exportData(){
+  const payload = {
+    app: 'mrs-baker',
+    exportedAt: new Date().toISOString(),
+    ingredients: state.ingredients,
+    recipes: state.recipes,
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const stamp = new Date().toISOString().slice(0,10);
+  a.href = url;
+  a.download = `mrs-baker-backup-${stamp}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  showToast('Backup downloaded 📦');
+}
+
+function importDataFile(file){
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    let data;
+    try { data = JSON.parse(e.target.result); }
+    catch(err){ showToast("That file doesn't look right"); return; }
+    if (!data || !Array.isArray(data.ingredients) || !Array.isArray(data.recipes)){
+      showToast("That file doesn't look right");
+      return;
+    }
+    showConfirmModal({
+      emoji: '⬆️',
+      title: 'Restore this backup?',
+      body: 'This will replace everything currently saved on this device with the contents of the backup file.',
+      confirmLabel: 'Restore',
+      onConfirm: () => {
+        state.ingredients = data.ingredients.map(migrateIngredient);
+        state.recipes = data.recipes.map(r => migrateRecipe(r, state.ingredients));
+        saveIngredients();
+        saveRecipes();
+        closeModal();
+        showToast('Backup restored ✅');
+        goHome();
+      }
+    });
+  };
+  reader.readAsText(file);
+}
+
 // ---------------- navigation ----------------
 function goHome(){
   state.view = 'home';
@@ -409,7 +552,7 @@ function goIngredients(){
   render();
 }
 function openNewRecipe(){
-  state.draftRecipe = { id: null, name: '', photo: null, items: [] };
+  state.draftRecipe = { id: null, name: '', photo: null, sellPrice: '', yieldCount: '', items: [] };
   state.editingRecipeId = null;
   state.view = 'recipeForm';
   render();
@@ -432,13 +575,26 @@ function cancelEditIngredient(){
   state.editingIngredientId = null;
   render();
 }
+function toggleIngredientHistory(id){
+  state.historyOpenId = state.historyOpenId === id ? null : id;
+  render();
+}
 function saveEditedIngredient(id, price, qty, unit){
   const ing = state.ingredients.find(i => i.id === id);
   if (!ing) return;
+  const newPrice = parseFloat(price) || 0;
   const q = parseFloat(qty);
-  ing.price = parseFloat(price) || 0;
-  ing.qty = (isNaN(q) || q <= 0) ? 1 : q;
-  ing.unit = (unit && unit.trim()) || 'g';
+  const newQty = (isNaN(q) || q <= 0) ? 1 : q;
+  const newUnit = (unit && unit.trim()) || 'g';
+  // Only log history when something actually changed, so we don't fill it with no-op saves.
+  if (newPrice !== ing.price || newQty !== ing.qty || newUnit !== ing.unit){
+    if (!Array.isArray(ing.priceHistory)) ing.priceHistory = [];
+    ing.priceHistory.unshift({ price: ing.price, qty: ing.qty, unit: ing.unit, date: new Date().toISOString() });
+    ing.priceHistory = ing.priceHistory.slice(0, 10);
+  }
+  ing.price = newPrice;
+  ing.qty = newQty;
+  ing.unit = newUnit;
   state.editingIngredientId = null;
   saveIngredients();
   render();
@@ -448,13 +604,26 @@ function deleteIngredient(id){
   showConfirmModal({
     emoji: '🗑️',
     title: 'Remove this ingredient?',
-    body: 'It will be removed from the price list. Recipes using it will keep their grams but show no cost for it.',
+    body: 'It will be removed from the price list. Recipes using it will keep their amounts but show no cost for it.',
     confirmLabel: 'Remove',
     onConfirm: () => {
+      const idx = state.ingredients.findIndex(i => i.id === id);
+      const removed = state.ingredients[idx];
       state.ingredients = state.ingredients.filter(i => i.id !== id);
       saveIngredients();
       closeModal();
       render();
+      undoStash = { type: 'ingredient', data: removed, index: idx };
+      showToast(`${removed.emoji} ${removed.name} removed`, {
+        actionLabel: 'Undo',
+        onAction: () => {
+          if (!undoStash || undoStash.type !== 'ingredient') return;
+          state.ingredients.splice(undoStash.index, 0, undoStash.data);
+          saveIngredients();
+          undoStash = null;
+          render();
+        }
+      });
     }
   });
 }
@@ -469,6 +638,7 @@ function addIngredient(name, emoji, price, qty, unit){
     price: parseFloat(price) || 0,
     qty: (isNaN(q) || q <= 0) ? 100 : q,
     unit: (unit && unit.trim()) || 'g',
+    priceHistory: [],
   };
   state.ingredients.push(newIng);
   saveIngredients();
@@ -487,6 +657,8 @@ function addItemToDraft(ingredientId){
   }
   const ing = state.ingredients.find(i => i.id === ingredientId);
   state.draftRecipe.items.push({ ingredientId, amount: '', unit: ing ? ing.unit : 'g' });
+  state.recentIngredientIds = [ingredientId, ...state.recentIngredientIds.filter(id => id !== ingredientId)].slice(0, 6);
+  saveRecents();
   render();
 }
 function removeItemFromDraft(ingredientId){
@@ -499,8 +671,7 @@ function updateDraftAmount(ingredientId, amount){
   // live-update DOM without full re-render to keep focus
   const costEl = document.querySelector(`.item-cost[data-for="${ingredientId}"]`);
   if (costEl) costEl.textContent = 'Rs. ' + fmtRs(costOf(ingredientId, amount, it ? it.unit : undefined));
-  const totalEl = document.querySelector('.total-ticket .amount');
-  if (totalEl) totalEl.textContent = 'Rs. ' + fmtRs(recipeTotal(state.draftRecipe));
+  updateTotalsDisplay();
 }
 function updateDraftUnit(ingredientId, unit){
   const it = state.draftRecipe.items.find(x => x.ingredientId === ingredientId);
@@ -509,6 +680,39 @@ function updateDraftUnit(ingredientId, unit){
 }
 function updateDraftName(val){
   state.draftRecipe.name = val;
+}
+function updateDraftSellPrice(val){
+  state.draftRecipe.sellPrice = val;
+  updateTotalsDisplay();
+}
+function updateDraftYield(val){
+  state.draftRecipe.yieldCount = val;
+  updateTotalsDisplay();
+}
+// Refreshes the total-cost ticket and the profit/cost-per-piece block without a full re-render,
+// so typing in the amount/sell-price/yield fields never loses focus.
+function updateTotalsDisplay(){
+  const totalEl = document.querySelector('.total-ticket .amount');
+  if (totalEl) totalEl.textContent = 'Rs. ' + fmtRs(recipeTotal(state.draftRecipe));
+  const profitEl = document.getElementById('profit-block');
+  if (profitEl) profitEl.innerHTML = profitBlockHtml(state.draftRecipe);
+}
+function profitBlockHtml(draft){
+  const total = recipeTotal(draft);
+  const sell = parseFloat(draft.sellPrice);
+  const yieldN = parseFloat(draft.yieldCount);
+  const rows = [];
+  if (yieldN > 0){
+    rows.push(`<div class="profit-row"><span>Cost per piece</span><span>Rs. ${fmtRs(total / yieldN)}</span></div>`);
+  }
+  if (!isNaN(sell) && draft.sellPrice !== ''){
+    const profit = sell - total;
+    rows.push(`<div class="profit-row"><span>Profit per batch</span><span class="${profit >= 0 ? 'profit-pos' : 'profit-neg'}">Rs. ${fmtRs(profit)}</span></div>`);
+    if (yieldN > 0){
+      rows.push(`<div class="profit-row"><span>Profit per piece</span><span class="${profit >= 0 ? 'profit-pos' : 'profit-neg'}">Rs. ${fmtRs(profit / yieldN)}</span></div>`);
+    }
+  }
+  return rows.join('');
 }
 
 function handlePhotoFile(file){
@@ -557,12 +761,39 @@ function deleteRecipe(){
     body: 'This can\'t be undone.',
     confirmLabel: 'Delete',
     onConfirm: () => {
+      const idx = state.recipes.findIndex(r => r.id === state.editingRecipeId);
+      const removed = state.recipes[idx];
       state.recipes = state.recipes.filter(r => r.id !== state.editingRecipeId);
       saveRecipes();
       closeModal();
       goHome();
+      undoStash = { type: 'recipe', data: removed, index: idx };
+      showToast(`"${removed.name}" deleted`, {
+        actionLabel: 'Undo',
+        onAction: () => {
+          if (!undoStash || undoStash.type !== 'recipe') return;
+          state.recipes.splice(undoStash.index, 0, undoStash.data);
+          saveRecipes();
+          undoStash = null;
+          render();
+        }
+      });
     }
   });
+}
+
+function duplicateRecipe(){
+  const r = state.recipes.find(x => x.id === state.editingRecipeId);
+  if (!r) return;
+  const copy = JSON.parse(JSON.stringify(r));
+  copy.id = uid('recipe');
+  copy.name = copy.name + ' (copy)';
+  state.recipes.push(copy);
+  saveRecipes();
+  showToast('Recipe duplicated 🧾');
+  state.draftRecipe = JSON.parse(JSON.stringify(copy));
+  state.editingRecipeId = copy.id;
+  render();
 }
 
 // ---------------- modal ----------------
@@ -610,10 +841,16 @@ function renderHome(){
         <h1>Mrs. Baker needs help</h1>
         <p>Today's bake costs, sorted.</p>
       </div>
+      <button class="text-toggle-btn" id="text-toggle-btn">Aa ${state.textLarge ? '−' : '+'}</button>
     </div>
     <div class="action-row">
       <button class="btn btn-primary" id="new-recipe-btn">+ New recipe</button>
       <button class="btn btn-secondary" id="manage-ing-btn">🧾 Ingredients</button>
+    </div>
+    <div class="backup-row">
+      <button class="btn btn-secondary" id="export-btn">⬇️ Backup</button>
+      <button class="btn btn-secondary" id="import-btn">⬆️ Restore</button>
+      <input type="file" id="import-input" accept="application/json" style="display:none;" />
     </div>
     ${state.recipes.length === 0 ? `
       <div class="empty-state">
@@ -622,22 +859,62 @@ function renderHome(){
         <p>Add your first recipe with its ingredients and a photo —<br/>it'll be ready to cost out every time you bake.</p>
       </div>
     ` : `
-      <div class="recipe-grid">
-        ${state.recipes.map(r => `
+      <div class="search-wrap">
+        <input type="text" id="search-input" placeholder="Search recipes…" value="${escapeHtml(state.searchQuery)}" />
+      </div>
+      <div id="recipe-grid-wrap"></div>
+    `}
+  `;
+  document.getElementById('new-recipe-btn').onclick = openNewRecipe;
+  document.getElementById('manage-ing-btn').onclick = goIngredients;
+  document.getElementById('export-btn').onclick = exportData;
+  const importInput = document.getElementById('import-input');
+  document.getElementById('import-btn').onclick = () => importInput.click();
+  importInput.onchange = (e) => importDataFile(e.target.files[0]);
+  document.getElementById('text-toggle-btn').onclick = () => { toggleTextSize(); render(); };
+
+  if (state.recipes.length > 0){
+    renderRecipeGrid();
+    const searchInput = document.getElementById('search-input');
+    searchInput.addEventListener('input', (e) => {
+      state.searchQuery = e.target.value;
+      renderRecipeGrid();
+    });
+  }
+}
+
+// Rebuilds just the recipe grid (used on every search keystroke) so the search box never loses focus.
+function renderRecipeGrid(){
+  const wrap = document.getElementById('recipe-grid-wrap');
+  if (!wrap) return;
+  const q = state.searchQuery.trim().toLowerCase();
+  const filtered = q ? state.recipes.filter(r => r.name.toLowerCase().includes(q)) : state.recipes;
+  wrap.innerHTML = filtered.length === 0 ? `
+    <div class="empty-state">
+      <span class="emoji">🔍</span>
+      <h3>No matches</h3>
+      <p>No recipes match "${escapeHtml(state.searchQuery)}".</p>
+    </div>
+  ` : `
+    <div class="recipe-grid">
+      ${filtered.map(r => {
+        const total = recipeTotal(r);
+        const sell = parseFloat(r.sellPrice);
+        const showProfit = !isNaN(sell) && r.sellPrice !== '';
+        return `
           <div class="recipe-card" data-id="${r.id}">
             <div class="recipe-photo-wrap">
               ${r.photo ? `<img src="${r.photo}" alt="${escapeHtml(r.name)}"/>` : `<span class="placeholder-emoji">🧁</span>`}
             </div>
             <h3>${escapeHtml(r.name)}</h3>
-            <span class="price-seal"><span class="rs">Rs.</span>${fmtRs(recipeTotal(r))}</span>
+            <span class="price-seal"><span class="rs">Rs.</span>${fmtRs(total)}</span>
+            ${showProfit ? `<span class="profit-chip">${sell - total >= 0 ? '↑' : '↓'} Rs. ${fmtRs(Math.abs(sell - total))}</span>` : ''}
           </div>
-        `).join('')}
-      </div>
-    `}
+        `;
+      }).join('')}
+    </div>
   `;
-  document.getElementById('new-recipe-btn').onclick = openNewRecipe;
-  document.getElementById('manage-ing-btn').onclick = goIngredients;
-  document.querySelectorAll('.recipe-card').forEach(card => {
+  wrap.querySelectorAll('.recipe-card').forEach(card => {
     card.onclick = () => openEditRecipe(card.dataset.id);
   });
 }
@@ -717,11 +994,26 @@ function renderIngredients(){
             if (baseQty <= 0) return '';
             return ` (Rs. ${fmtRs(ing.price / baseQty)} / ${grp.base})`;
           })()}</div>
+          ${state.historyOpenId === ing.id && ing.priceHistory && ing.priceHistory.length > 0 ? `
+            <div class="ing-history">
+              ${ing.priceHistory.slice(0,5).map(h => `
+                <div class="hist-row">
+                  <span>Rs. ${fmtRs(h.price)} per ${fmtRs(h.qty)} ${escapeHtml(h.unit)}</span>
+                  <span>${new Date(h.date).toLocaleDateString()}</span>
+                </div>
+              `).join('')}
+            </div>
+          ` : ''}
         </div>
+        ${ing.priceHistory && ing.priceHistory.length > 0 ? `<button class="icon-btn history-ing-btn" data-id="${ing.id}">🕓</button>` : ''}
         <button class="icon-btn edit-ing-btn" data-id="${ing.id}">✏️</button>
         <button class="icon-btn delete-ing-btn" data-id="${ing.id}">✕</button>
       </div>`;
   }).join('');
+
+  listEl.querySelectorAll('.history-ing-btn').forEach(btn => {
+    btn.onclick = () => toggleIngredientHistory(btn.dataset.id);
+  });
 
   listEl.querySelectorAll('.edit-ing-btn').forEach(btn => {
     btn.onclick = () => startEditIngredient(btn.dataset.id);
@@ -767,6 +1059,11 @@ function renderRecipeForm(){
   const draft = state.draftRecipe;
   const usedIds = new Set(draft.items.map(i => i.ingredientId));
   const available = state.ingredients.filter(i => !usedIds.has(i.id));
+  const recentAvailable = state.recentIngredientIds
+    .map(id => available.find(i => i.id === id))
+    .filter(Boolean);
+  const recentIds = new Set(recentAvailable.map(i => i.id));
+  const restAvailable = available.filter(i => !recentIds.has(i.id));
 
   app.innerHTML = `
     <div class="back-row">
@@ -814,16 +1111,36 @@ function renderRecipeForm(){
     <div class="add-item-row">
       <select id="add-item-select">
         <option value="">+ Add an ingredient…</option>
-        ${available.map(i => `<option value="${i.id}">${i.emoji} ${escapeHtml(i.name)}</option>`).join('')}
+        ${recentAvailable.length > 0 ? `
+          <optgroup label="Recently used">
+            ${recentAvailable.map(i => `<option value="${i.id}">${i.emoji} ${escapeHtml(i.name)}</option>`).join('')}
+          </optgroup>
+          <optgroup label="All ingredients">
+            ${restAvailable.map(i => `<option value="${i.id}">${i.emoji} ${escapeHtml(i.name)}</option>`).join('')}
+          </optgroup>
+        ` : `
+          ${available.map(i => `<option value="${i.id}">${i.emoji} ${escapeHtml(i.name)}</option>`).join('')}
+        `}
       </select>
+    </div>
+
+    <div class="field">
+      <label>Makes how many pieces? <span style="font-weight:400;">(optional)</span></label>
+      <input type="number" inputmode="decimal" min="0" id="recipe-yield" placeholder="e.g. 20" value="${escapeHtml(String(draft.yieldCount))}" />
+    </div>
+    <div class="field">
+      <label>Sell for, Rs. <span style="font-weight:400;">(optional)</span></label>
+      <input type="number" inputmode="decimal" min="0" id="recipe-sell-price" placeholder="e.g. 500" value="${escapeHtml(String(draft.sellPrice))}" />
     </div>
 
     <div class="total-ticket">
       <span class="label">Total cost</span>
       <span class="amount">Rs. ${fmtRs(recipeTotal(draft))}</span>
     </div>
+    <div class="profit-block" id="profit-block">${profitBlockHtml(draft)}</div>
 
     <button class="btn btn-primary btn-full" id="save-recipe-btn">Save recipe</button>
+    ${state.editingRecipeId ? `<button class="btn btn-secondary btn-full" style="margin-top:10px;" id="duplicate-recipe-btn">🧾 Duplicate recipe</button>` : ''}
     ${state.editingRecipeId ? `<button class="btn btn-danger btn-full" style="margin-top:10px;" id="delete-recipe-btn">Delete recipe</button>` : ''}
   `;
 
@@ -831,6 +1148,8 @@ function renderRecipeForm(){
   document.getElementById('photo-upload').onclick = () => document.getElementById('photo-input').click();
   document.getElementById('photo-input').onchange = (e) => handlePhotoFile(e.target.files[0]);
   document.getElementById('recipe-name').addEventListener('input', (e) => updateDraftName(e.target.value));
+  document.getElementById('recipe-yield').addEventListener('input', (e) => updateDraftYield(e.target.value));
+  document.getElementById('recipe-sell-price').addEventListener('input', (e) => updateDraftSellPrice(e.target.value));
 
   document.querySelectorAll('.grams-input').forEach(inp => {
     inp.addEventListener('input', (e) => updateDraftAmount(e.target.dataset.id, e.target.value));
@@ -845,6 +1164,9 @@ function renderRecipeForm(){
     addItemToDraft(e.target.value);
   };
   document.getElementById('save-recipe-btn').onclick = saveDraftRecipe;
+  if (document.getElementById('duplicate-recipe-btn')) {
+    document.getElementById('duplicate-recipe-btn').onclick = duplicateRecipe;
+  }
   if (state.editingRecipeId){
     document.getElementById('delete-recipe-btn').onclick = deleteRecipe;
   }
