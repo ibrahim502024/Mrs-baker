@@ -189,6 +189,7 @@
     background:var(--cream); border:1.5px solid var(--line); color:var(--cocoa-soft); cursor:pointer;
   }
   .unit-chip:active{ background:var(--cream-deep); }
+  .unit-chip-active{ background:var(--rose); border-color:var(--rose); color:#fff; }
   .ing-row-edit{ display:block; }
   .ing-row-edit .field{ margin-bottom:8px; }
   .ing-row-edit .field label{ margin-bottom:3px; }
@@ -339,6 +340,7 @@ function migrateRecipe(r, ingredients){
   return {
     ...r,
     sellPrice: r.sellPrice !== undefined ? r.sellPrice : '',
+    sellMode: r.sellMode === 'piece' ? 'piece' : 'batch', // how to interpret sellPrice: per piece, or for the whole batch
     yieldCount: r.yieldCount !== undefined ? r.yieldCount : '',
     items: (r.items || []).map(it => {
       if (it.amount !== undefined && it.unit !== undefined) return it;
@@ -552,7 +554,7 @@ function goIngredients(){
   render();
 }
 function openNewRecipe(){
-  state.draftRecipe = { id: null, name: '', photo: null, sellPrice: '', yieldCount: '', items: [] };
+  state.draftRecipe = { id: null, name: '', photo: null, sellPrice: '', sellMode: 'batch', yieldCount: '', items: [] };
   state.editingRecipeId = null;
   state.view = 'recipeForm';
   render();
@@ -689,6 +691,10 @@ function updateDraftYield(val){
   state.draftRecipe.yieldCount = val;
   updateTotalsDisplay();
 }
+function updateDraftSellMode(mode){
+  state.draftRecipe.sellMode = mode;
+  render();
+}
 // Refreshes the total-cost ticket and the profit/cost-per-piece block without a full re-render,
 // so typing in the amount/sell-price/yield fields never loses focus.
 function updateTotalsDisplay(){
@@ -701,14 +707,22 @@ function profitBlockHtml(draft){
   const total = recipeTotal(draft);
   const sell = parseFloat(draft.sellPrice);
   const yieldN = parseFloat(draft.yieldCount);
+  const hasYield = yieldN > 0;
+  const hasSell = !isNaN(sell) && draft.sellPrice !== '';
   const rows = [];
-  if (yieldN > 0){
+  if (hasYield){
     rows.push(`<div class="profit-row"><span>Cost per piece</span><span>Rs. ${fmtRs(total / yieldN)}</span></div>`);
   }
-  if (!isNaN(sell) && draft.sellPrice !== ''){
-    const profit = sell - total;
+  if (hasSell){
+    // "per piece" mode needs a yield to make sense; without one, fall back to treating it as the whole batch.
+    const isPerPiece = draft.sellMode === 'piece' && hasYield;
+    const totalRevenue = isPerPiece ? sell * yieldN : sell;
+    const profit = totalRevenue - total;
+    if (isPerPiece){
+      rows.push(`<div class="profit-row"><span>Total revenue (${fmtRs(yieldN)} × Rs. ${fmtRs(sell)})</span><span>Rs. ${fmtRs(totalRevenue)}</span></div>`);
+    }
     rows.push(`<div class="profit-row"><span>Profit per batch</span><span class="${profit >= 0 ? 'profit-pos' : 'profit-neg'}">Rs. ${fmtRs(profit)}</span></div>`);
-    if (yieldN > 0){
+    if (hasYield){
       rows.push(`<div class="profit-row"><span>Profit per piece</span><span class="${profit >= 0 ? 'profit-pos' : 'profit-neg'}">Rs. ${fmtRs(profit / yieldN)}</span></div>`);
     }
   }
@@ -1130,7 +1144,13 @@ function renderRecipeForm(){
     </div>
     <div class="field">
       <label>Sell for, Rs. <span style="font-weight:400;">(optional)</span></label>
-      <input type="number" inputmode="decimal" min="0" id="recipe-sell-price" placeholder="e.g. 500" value="${escapeHtml(String(draft.sellPrice))}" />
+      <div class="qty-unit-row" style="margin-bottom:8px;">
+        <input type="number" inputmode="decimal" min="0" id="recipe-sell-price" placeholder="e.g. 500" value="${escapeHtml(String(draft.sellPrice))}" style="flex:1;" />
+      </div>
+      <div class="unit-chips">
+        <span class="unit-chip ${draft.sellMode !== 'piece' ? 'unit-chip-active' : ''}" data-mode="batch">Whole batch</span>
+        <span class="unit-chip ${draft.sellMode === 'piece' ? 'unit-chip-active' : ''}" data-mode="piece">Per piece</span>
+      </div>
     </div>
 
     <div class="total-ticket">
@@ -1150,6 +1170,10 @@ function renderRecipeForm(){
   document.getElementById('recipe-name').addEventListener('input', (e) => updateDraftName(e.target.value));
   document.getElementById('recipe-yield').addEventListener('input', (e) => updateDraftYield(e.target.value));
   document.getElementById('recipe-sell-price').addEventListener('input', (e) => updateDraftSellPrice(e.target.value));
+  const sellModeChips = app.querySelectorAll('.unit-chip[data-mode]');
+  sellModeChips.forEach(chip => {
+    chip.onclick = () => updateDraftSellMode(chip.dataset.mode);
+  });
 
   document.querySelectorAll('.grams-input').forEach(inp => {
     inp.addEventListener('input', (e) => updateDraftAmount(e.target.dataset.id, e.target.value));
