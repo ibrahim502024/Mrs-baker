@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Mrs. Baker needs help</title>
+<title>Mrs. Baker</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#D9767E">
 <link rel="icon" href="icon-192.png">
@@ -509,7 +509,7 @@ function exportData(){
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
-  showToast('Backup downloaded 📦');
+  showToast('Backup downloaded');
 }
 
 function importDataFile(file){
@@ -518,15 +518,15 @@ function importDataFile(file){
   reader.onload = (e) => {
     let data;
     try { data = JSON.parse(e.target.result); }
-    catch(err){ showToast("That file doesn't look right"); return; }
+    catch(err){ showToast("Couldn't read that file"); return; }
     if (!data || !Array.isArray(data.ingredients) || !Array.isArray(data.recipes)){
-      showToast("That file doesn't look right");
+      showToast("Couldn't read that file");
       return;
     }
     showConfirmModal({
       emoji: '⬆️',
-      title: 'Restore this backup?',
-      body: 'This will replace everything currently saved on this device with the contents of the backup file.',
+      title: 'Restore backup?',
+      body: 'This replaces everything currently saved on this device.',
       confirmLabel: 'Restore',
       onConfirm: () => {
         state.ingredients = data.ingredients.map(migrateIngredient);
@@ -534,7 +534,7 @@ function importDataFile(file){
         saveIngredients();
         saveRecipes();
         closeModal();
-        showToast('Backup restored ✅');
+        showToast('Backup restored');
         goHome();
       }
     });
@@ -543,20 +543,32 @@ function importDataFile(file){
 }
 
 // ---------------- navigation ----------------
-function goHome(){
+// The history stack is kept as [exit marker, home, (ingredients | recipe form)], so the phone's
+// back button steps back through the app instead of closing it.
+let lastBackAt = 0;
+
+function showHome(){
   state.view = 'home';
   state.draftRecipe = null;
   state.editingRecipeId = null;
   render();
 }
+function goHome(){
+  const page = history.state && history.state.page;
+  if (page === 'ingredients' || page === 'recipeForm') history.back(); // popstate handler shows home
+  else showHome();
+}
+function pushPage(page){ history.pushState({ page }, ''); }
 function goIngredients(){
   state.view = 'ingredients';
+  pushPage('ingredients');
   render();
 }
 function openNewRecipe(){
   state.draftRecipe = { id: null, name: '', photo: null, sellPrice: '', sellMode: 'batch', yieldCount: '', items: [] };
   state.editingRecipeId = null;
   state.view = 'recipeForm';
+  pushPage('recipeForm');
   render();
 }
 function openEditRecipe(id){
@@ -565,6 +577,7 @@ function openEditRecipe(id){
   state.draftRecipe = JSON.parse(JSON.stringify(r));
   state.editingRecipeId = id;
   state.view = 'recipeForm';
+  pushPage('recipeForm');
   render();
 }
 
@@ -605,8 +618,8 @@ function saveEditedIngredient(id, price, qty, unit){
 function deleteIngredient(id){
   showConfirmModal({
     emoji: '🗑️',
-    title: 'Remove this ingredient?',
-    body: 'It will be removed from the price list. Recipes using it will keep their amounts but show no cost for it.',
+    title: 'Remove ingredient?',
+    body: "Recipes using it will keep their amounts, but won't show a cost for it.",
     confirmLabel: 'Remove',
     onConfirm: () => {
       const idx = state.ingredients.findIndex(i => i.id === id);
@@ -631,7 +644,7 @@ function deleteIngredient(id){
 }
 
 function addIngredient(name, emoji, price, qty, unit){
-  if (!name || !name.trim()) { showToast('Give it a name first'); return; }
+  if (!name || !name.trim()) { showToast('Enter a name first'); return; }
   const q = parseFloat(qty);
   const newIng = {
     id: uid('ing'),
@@ -804,7 +817,7 @@ function duplicateRecipe(){
   copy.name = copy.name + ' (copy)';
   state.recipes.push(copy);
   saveRecipes();
-  showToast('Recipe duplicated 🧾');
+  showToast('Recipe duplicated');
   state.draftRecipe = JSON.parse(JSON.stringify(copy));
   state.editingRecipeId = copy.id;
   render();
@@ -839,7 +852,7 @@ function renderModal(){
 // ---------------- render ----------------
 function render(){
   if (state.loading){
-    app.innerHTML = `<div class="loading-wrap"><span class="emoji">🥐</span>Warming up the oven…</div>`;
+    app.innerHTML = `<div class="loading-wrap">Loading…</div>`;
     return;
   }
   if (state.view === 'home') renderHome();
@@ -852,25 +865,25 @@ function renderHome(){
     <div class="topbar">
       <span class="rolling-pin">🥖</span>
       <div class="brand">
-        <h1>Mrs. Baker needs help</h1>
-        <p>Today's bake costs, sorted.</p>
+        <h1>Mrs. Baker</h1>
+        <p>Recipe costs and pricing</p>
       </div>
       <button class="text-toggle-btn" id="text-toggle-btn">Aa ${state.textLarge ? '−' : '+'}</button>
     </div>
     <div class="action-row">
       <button class="btn btn-primary" id="new-recipe-btn">+ New recipe</button>
-      <button class="btn btn-secondary" id="manage-ing-btn">🧾 Ingredients</button>
+      <button class="btn btn-secondary" id="manage-ing-btn">Ingredients</button>
     </div>
     <div class="backup-row">
-      <button class="btn btn-secondary" id="export-btn">⬇️ Backup</button>
-      <button class="btn btn-secondary" id="import-btn">⬆️ Restore</button>
+      <button class="btn btn-secondary" id="export-btn">Backup</button>
+      <button class="btn btn-secondary" id="import-btn">Restore</button>
       <input type="file" id="import-input" accept="application/json" style="display:none;" />
     </div>
     ${state.recipes.length === 0 ? `
       <div class="empty-state">
         <span class="emoji">🍰</span>
-        <h3>No recipes yet</h3>
-        <p>Add your first recipe with its ingredients and a photo —<br/>it'll be ready to cost out every time you bake.</p>
+        <h3>No recipes saved</h3>
+        <p>Add a recipe to start tracking its cost.</p>
       </div>
     ` : `
       <div class="search-wrap">
@@ -906,8 +919,7 @@ function renderRecipeGrid(){
   wrap.innerHTML = filtered.length === 0 ? `
     <div class="empty-state">
       <span class="emoji">🔍</span>
-      <h3>No matches</h3>
-      <p>No recipes match "${escapeHtml(state.searchQuery)}".</p>
+      <h3>No matches for "${escapeHtml(state.searchQuery)}"</h3>
     </div>
   ` : `
     <div class="recipe-grid">
@@ -1087,7 +1099,7 @@ function renderRecipeForm(){
       ${draft.photo ? `<img src="${draft.photo}" alt="Recipe photo"/><span class="photo-edit-badge">Change photo</span>` : `
         <div class="upload-hint">
           <span class="emoji">📷</span>
-          <span>Add a photo of this bake</span>
+          <span>Add a photo</span>
         </div>`}
     </div>
     <input type="file" accept="image/*" id="photo-input" style="display:none" />
@@ -1099,7 +1111,7 @@ function renderRecipeForm(){
 
     <h3 style="font-size:16px; margin:18px 0 10px;">Ingredients used</h3>
     <div id="items-list">
-      ${draft.items.length === 0 ? `<p style="font-size:13.5px; color:var(--cocoa-soft); margin-bottom:10px;">Add ingredients below to start costing this recipe.</p>` : ''}
+      ${draft.items.length === 0 ? `<p style="font-size:13.5px; color:var(--cocoa-soft); margin-bottom:10px;">Add ingredients to calculate the cost.</p>` : ''}
       ${draft.items.map(it => {
         const ing = state.ingredients.find(i => i.id === it.ingredientId);
         if (!ing) return '';
@@ -1160,7 +1172,7 @@ function renderRecipeForm(){
     <div class="profit-block" id="profit-block">${profitBlockHtml(draft)}</div>
 
     <button class="btn btn-primary btn-full" id="save-recipe-btn">Save recipe</button>
-    ${state.editingRecipeId ? `<button class="btn btn-secondary btn-full" style="margin-top:10px;" id="duplicate-recipe-btn">🧾 Duplicate recipe</button>` : ''}
+    ${state.editingRecipeId ? `<button class="btn btn-secondary btn-full" style="margin-top:10px;" id="duplicate-recipe-btn">Duplicate recipe</button>` : ''}
     ${state.editingRecipeId ? `<button class="btn btn-danger btn-full" style="margin-top:10px;" id="delete-recipe-btn">Delete recipe</button>` : ''}
   `;
 
@@ -1201,6 +1213,29 @@ function escapeHtml(str){
   div.textContent = str || '';
   return div.innerHTML;
 }
+
+// Phone back button handling
+window.addEventListener('popstate', (e) => {
+  if (modalConfig) closeModal();
+  const page = e.state && e.state.page;
+  if (page === 'exit'){
+    if (state.view !== 'home'){ showHome(); history.pushState({ page: 'home' }, ''); return; }
+    const now = Date.now();
+    if (now - lastBackAt < 2000){ history.back(); return; } // second press: leave the app
+    lastBackAt = now;
+    showToast('Press back again to exit');
+    history.pushState({ page: 'home' }, '');
+    return;
+  }
+  if (page === 'home' && state.view === 'home'){ history.back(); return; }
+  showHome();
+});
+(function initHistory(){
+  const page = history.state && history.state.page;
+  if (!page){ history.replaceState({ page: 'exit' }, ''); history.pushState({ page: 'home' }, ''); }
+  else if (page === 'exit'){ history.pushState({ page: 'home' }, ''); }
+  else if (page !== 'home'){ history.replaceState({ page: 'home' }, ''); }
+})();
 
 loadData();
 </script>
